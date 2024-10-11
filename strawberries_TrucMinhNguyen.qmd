@@ -1,0 +1,581 @@
+---
+title: "Stawberries"
+author: Truc Minh Nguyen
+date: 2024 Oct 11
+format: html
+editor: visual
+---
+
+# Preparing data for analysis
+
+Acquire, explore, clean & structure, EDA
+
+### Data cleaning and organization
+
+["An introduction to data cleaning with R" by Edwin de Jonge and Mark van der Loo](https://cran.r-project.org/doc/contrib/de_Jonge+van_der_Loo-Introduction_to_data_cleaning_with_R.pdf)
+
+["Problems, Methods, and Challenges in Comprehensive Data Cleansing" by Heiko Müller and Johann-Christoph Freytag](https://www.researchgate.net/profile/Heiko-Mueller/publication/228929938_Problems_methods_and_challenges_in_comprehensive_data_cleansing/links/09e415101b58541e2c000000/Problems-methods-and-challenges-in-comprehensive-data-cleansing.pdf)
+
+## Strawberries
+
+**Questions**
+
+-   Where they are grown? By whom?
+
+-   Are they really loaded with carcinogenic poisons?
+
+-   Are they really good for your health? Bad for your health?
+
+-   Are organic strawberries carriers of deadly diseases?
+
+-   When I go to the market should I buy conventional or organic strawberries?
+
+-   Do Strawberry farmers make money?
+
+-   How do the strawberries I buy get to my market?
+
+## The data
+
+The data set for this assignment has been selected from:
+
+\[[USDA_NASS_strawb_2024SEP25](https://quickstats.nass.usda.gov) The data have been stored on NASS here: [USDA_NASS_strawb_2024SEP25](https://quickstats.nass.usda.gov/results/28141CE5-7429-36C3-A385-33ACC8030763)
+
+and has been stored on the blackboard as strawberries25_v3.csv.
+
+## read and explore the data
+
+Set-up
+
+```{r}
+#| label: load libraries and set options
+#| warning: false
+#| message: false
+#| 
+
+library(knitr)  
+library(kableExtra)
+library(tidyverse)
+
+
+```
+
+Read the data and take a first look
+
+```{r}
+#| label: read data - glimpse 
+
+strawberry <- read_csv("strawberries25_v3.csv", col_names = TRUE)
+
+glimpse(strawberry)
+```
+
+I have 12699 rows and 21 columns.
+
+All I can see from the glimpse is I have date, location, values and coefficients of variation.
+
+Examine the data. How is it organized?
+
+```{r}
+#| label: explore organization 1 
+
+
+## Is every line associated with a state?
+
+state_all <- strawberry |> distinct(State)
+
+state_all1 <- strawberry |> group_by(State) |> count()
+
+## every row is associated with a state
+
+if(sum(state_all1$n) == dim(strawberry)[1]){print("Yes every row in the data is associated with a state.")}
+
+## rm(state_all, state_all1)
+
+##Ditch counties
+unique(strawberry$`Geo Level`)
+
+strawberry <- strawberry |> 
+  filter(`Geo Level`== "NATIONAL" | `Geo Level`== "STATE")
+  
+
+```
+
+## remove columns with a single value in all rows
+
+```{r}
+#|label: function def - drop 1-item columns
+
+drop_one_value_col <- function(df){ 
+ # browser()
+  df_id <- ensym(df)
+  msg = paste("Looking for single value columns in data frame: ",as.character(df_id) )
+  print(msg)
+  ## takes whole dataframe
+dropc <- NULL
+val <- NULL
+## test each column for a single value
+for(i in 1:dim(df)[2]){   
+  if(dim(distinct(df[,i]))[1] == 1){
+    dropc <- c(dropc, i)
+    val <- c(val, df[1,i])
+  }
+} 
+
+if(is.null(dropc)){
+  print("No columns dropped")
+  return(df)}else{
+   print("Columns dropped:")
+   # print(colnames(df)[drop])
+   print(unlist(val))
+   df <- df[, -1*dropc]
+   return(df)
+   }
+}
+
+## use the function
+
+strawberry <- drop_one_value_col(strawberry)
+
+drop_one_value_col(strawberry)
+
+```
+
+## Census data first
+
+```{r}
+#| label: srawberries split census, survey
+
+
+straw_cen <- strawberry |> filter(Program=="CENSUS")
+
+straw_sur <- strawberry |> filter(Program=="SURVEY")
+
+straw_cen <- straw_cen |> drop_one_value_col()
+
+straw_sur <- straw_sur |> drop_one_value_col()
+
+
+```
+
+```{r}
+#| label: straw_cen split cols
+
+straw_cen <- straw_cen |>
+  separate_wider_delim(  cols = `Data Item`,
+                         delim = " - ",
+                         names = c("strawberries",
+                                 "Category"),
+                         too_many = "error",
+                         too_few = "align_start"
+                       )
+
+```
+
+```{r}
+#| label: isolate organic
+
+# 
+# unique(straw_cen$strawberries)
+# straw_cen$strawberries |> str_which("STRAWBERRIES") |> length()
+# straw_cen$strawberries |> str_which("STRAWBERRIES, ORGANIC") |> length()
+# straw_cen$strawberries |> str_which("STRAWBERRIES, ORGANIC, FRESH MARKET") |> length()
+# straw_cen$strawberries |> str_which("STRAWBERRIES, ORGANIC, PROCESSING" ) |> length()
+# 
+# ## count the cases
+# straw_cen$strawberries |> str_which("ORGANIC") |> length()
+# straw_cen$strawberries |> str_which("FRESH MARKET") |> length()
+# straw_cen$strawberries |> str_which("PROCESSING") |> length()
+
+straw_cen <- straw_cen |>
+  separate_wider_delim(  cols = strawberries,
+                         delim = ", ",
+                         names = c("strawberries",
+                                 "ORGANIC",
+                                 "organic_detail"),
+                         
+                         too_many = "error",
+                         too_few = "align_start"
+                       )
+
+
+straw_cen <- straw_cen |> drop_one_value_col()
+
+## how many organic rows?
+
+organic_cen <- straw_cen |> filter(ORGANIC == "ORGANIC")
+
+sum(is.na(straw_cen$ORGANIC))
+
+#Subste straw_cen to non-organic only
+straw_cen <- straw_cen[(is.na(straw_cen$ORGANIC)),]
+
+
+straw_cen <- straw_cen |> drop_one_value_col()
+
+```
+
+Note that straw_cen has only one year: 2022
+
+Current stats Census date has been isolated and split between Organic and Conventional strawberries
+
+############################################ 
+
+```{r}
+#| label: explore straw_cen$Category
+
+straw_cen <- straw_cen |>
+  separate_wider_delim(  cols = `Category`,
+                         delim = " ",
+                         names = c("COL1",
+                                 "COL2"),
+                         too_many = "merge",
+                         too_few = "align_start"
+                       )
+
+
+straw_cen$COL2 <- str_replace(straw_cen$COL2,"WITH ","")
+
+straw_cen <- straw_cen |> rename(Measure = COL1, Bearing_type= COL2)
+
+```
+```{r}
+#| label: explore straw_cen$Domain & Domain Category
+
+
+## remove AREA GROWN and parens 
+## change NOT SPECIFIEC TO TOTAL
+
+straw_cen <- straw_cen |> rename(size_bracket = `Domain Category`)
+
+straw_cen$size_bracket <- str_replace(straw_cen$size_bracket, "NOT SPECIFIED", "TOTAL")
+
+straw_cen$size_bracket <- str_replace(straw_cen$size_bracket, "AREA GROWN: ", "")
+straw_cen$size_bracket <- str_replace(straw_cen$size_bracket, "\\(", "")
+straw_cen$size_bracket <- str_replace(straw_cen$size_bracket, "\\)", "")
+
+```
+
+```{r}
+#| label: explore organic_cen
+
+organic_cen <- organic_cen |> drop_one_value_col()
+
+```
+```{r}
+#Split measure into acres and operations
+
+Measure_acres_cen <- straw_cen |> filter(straw_cen$Measure == "ACRES")
+Measure_acres_cen <- Measure_acres_cen |>
+  separate_wider_delim(  cols = "size_bracket",
+                         delim = " ",
+                         names = c("Min Acres",
+                                 "Max Acres"),
+                         too_many = "merge",
+                         too_few = "align_start"
+                       )
+
+Measure_acres_cen$`Max Acres` <- str_replace(Measure_acres_cen$`Max Acres`, "TO ", "")
+Measure_acres_cen$`Max Acres` <- str_replace(Measure_acres_cen$`Max Acres`, "ACRES", "")
+Measure_acres_cen$`Min Acres` <- str_replace(Measure_acres_cen$`Min Acres`, "TOTAL", "")
+
+#Convert acres columns to double
+Measure_acres_cen$`Max Acres` <- as.double(Measure_acres_cen$`Max Acres`)
+Measure_acres_cen$`Min Acres` <- as.double(Measure_acres_cen$`Min Acres`)
+
+#convert values column to numeric
+Measure_acres_cen$Value <- str_replace(Measure_acres_cen$Value, ",","")
+Measure_acres_cen$Value <- as.numeric(Measure_acres_cen$Value)
+
+#convert CV% to CV and to double"
+Measure_acres_cen$CV <- Measure_acres_cen$`CV (%)`
+Measure_acres_cen <- Measure_acres_cen %>% select(-`CV (%)`)
+Measure_acres_cen$CV <- as.double (Measure_acres_cen$CV)
+Measure_acres_cen$CV <- (Measure_acres_cen$CV)/100
+
+#sort acres min
+Measure_acres_cen$`Min Acres`[is.na(Measure_acres_cen$`Min Acres`)] <- 0
+Measure_acres_cen <- Measure_acres_cen[order(Measure_acres_cen$`Min Acres`),]
+
+#divide into state and national 
+state_cens <- Measure_acres_cen |> filter(Measure_acres_cen$`Geo Level`== "STATE")
+state_cens$`State ANSI` <- as.numeric(state_cens$`State ANSI`)
+state_cens <- state_cens[order(state_cens$`State ANSI`, state_cens$Bearing_type, state_cens$`Min Acres`),]
+
+#impute state_cens NA values in col Value, using polynomial regression fit
+impute_lm <- function(data){
+  filter_data <- data %>% filter(`Min Acres`!=0, !is.na(`Min Acres`), !is.na(Value))
+  uniq_acres <- unique(filter_data$`Min Acres`)
+  if(length(uniq_acres)>1){
+    model <- lm(Value ~ poly(`Min Acres`, 2, raw = TRUE), data = filter_data,
+                na.action = na.exclude)
+    data$Value[is.na(data$Value)] <- predict(model, newdata =
+                                               data[is.na(data$Value),])
+  }else{
+    cat("Invalid")
+  }
+  
+  return(data)
+}
+
+state_cens_imp <- state_cens %>% 
+  group_by(`State ANSI`, Bearing_type) %>%
+  do(impute_lm(.))
+
+state_cens_imp$Value <- round(state_cens_imp$Value)
+
+
+```
+
+
+
+#############
+To get better look at the data, look at California.
+
+```{r}
+#| label: explore California only
+
+calif <- strawberry |>  filter(State=="CALIFORNIA")
+
+## look at the unique values in the "Program" column
+
+## in the consol
+## unique(calif$Program)
+
+## and look at the data selection widget on 
+##      https://quickstats.nass.usda.gov
+
+## You can see that CENSUS AND SURVEY are the two sources
+## of data. (Why? What's the differences?).  So, let's see
+## they differ.
+
+calif_census <- calif |> filter(Program=="CENSUS")
+
+calif_survey  <- calif |>  filter(Program=="SURVEY")
+
+### do the same for Florida
+
+FL <- strawberry |> filter(State == "FLORIDA")
+FL_cens <- FL |> filter(Program == "CENSUS")
+FL_surv <- FL |> filter(Program == "SURVEY")
+
+
+##calif_survey <- strawberry |> select(Year, Period, `Data Item`, Value)
+
+
+```
+
+Explore California to understand the census and survey
+
+```{r}
+#| label: explore Calif census and survey 
+
+## no assignment -- just exploring
+
+calif_census_dropped <- drop_one_value_col(calif_census)
+
+calif_survey_dropped <- drop_one_value_col(calif_survey)
+
+#Explore Florida
+FL_cens_dr <- drop_one_value_col(FL_cens)
+
+FL_surv_dr <- drop_one_value_col(FL_surv)
+
+```
+
+Conclusions from California data exploration.
+
+## Now return to the entire data set.
+
+take the lessons learned by examining the California data
+
+Two strategies -- columns first, rows first
+
+Split the census data from the survey data. drop single value columns
+
+```{r}
+#Split census data from survey data of strawberry
+
+strawberry_census <- strawberry |> filter(Program == "CENSUS")
+strawberry_survey <- strawberry |> filter(Program == "SURVEY")
+
+#drop single value columns
+
+strawberry_census_dropped <- drop_one_value_col(strawberry_census)
+strawberry_survey_dropped <- drop_one_value_col(strawberry_survey)
+
+```
+
+```{r}
+strawberry_census$Value <- as.numeric(str_replace(strawberry_census$Value,",",""))
+```
+
+## separate composite columns
+
+### `Data Item` into (fruit, category, item)
+
+```{r}
+#|label: split Data Item
+
+  strawberry <- strawberry |>
+  separate_wider_delim(  cols = `Data Item`,
+                         delim = ",",
+                         names = c("Fruit",
+                                 "Category",
+                                 "Item",
+                                 "Metric"),
+                         too_many = "error",
+                         too_few = "align_start"
+                       )
+
+strawberry_survey_split <- strawberry_survey_dropped |>
+  separate_wider_delim( cols = `Data Item`,
+                        delim = ",",
+                        names = c("Fruit","Category","Item", "Metric"),
+                        too_many = "error",
+                        too_few = "align_start"
+                       )
+
+strawberry_survey_split$Category <- str_trim(strawberry_survey_split$Category, side = "both")
+strawberry_survey_split$Item <- str_trim(strawberry_survey_split$Item, side = "both")
+strawberry_survey_split$Metric <- str_trim(strawberry_survey_split$Metric, side = "both")
+
+survey_chem <- strawberry_survey_split |>
+  separate_wider_delim( cols = `Domain Category`,
+                        delim = ",",
+                        names = c("Chem", "Chem Usage"),
+                        too_many = "error",
+                        too_few = "align_start"
+                       )  
+
+survey_chem <- strawberry_survey_split|>
+  separate_wider_delim(cols = `Chem Usage`,
+                       delim = ":",
+                       names = c("Chem Usage", "Chem Type"),
+                       too_many = "error",
+                      too_few = "align_start"
+  )
+## Use too_many and too_few to set up the separation operation.
+# strawberry_census_split <- strawberry_census_dropped |>
+#   separate_wider_delim( cols = `Data Item`,
+#                         delim = ",",
+#                         names = c("Category","Item", "Metric"),
+#                         too_many = "debug",
+#                         too_few = "align_start"
+#                        )
+# 
+# strawberry_census_split$Category <- str_trim(strawberry_census_split$Category, side = "both")
+# strawberry_census_split$Item <- str_trim(strawberry_census_split$Item, side = "both")
+# strawberry_census_split$Metric <- str_trim(strawberry_census_split$Metric, side = "both")
+# 
+
+```
+
+There is a problem you have to fix -- a leading space.
+
+```{r}
+#|label: fix the leading space
+
+ # note
+strawberry$Category[1]
+# strawberry$Item[2]
+# strawberry$Metric[6]
+# strawberry$Domain[1]
+## 
+## trim white space 
+
+strawberry$Category <- str_trim(strawberry$Category, side = "both")
+strawberry$Item <- str_trim(strawberry$Item, side = "both")
+strawberry$Metric <- str_trim(strawberry$Metric, side = "both")
+
+```
+
+## now exam the Fruit column -- find hidden sub-columns
+
+```{r}
+
+unique(strawberry_survey_split$Fruit)
+
+## generate a list of rows with the production and price information
+
+spr <- which((strawberry_survey_split$Fruit=="STRAWBERRIES - PRODUCTION") | (strawberry_survey_split$Fruit=="STRAWBERRIES - PRICE RECEIVED"))
+
+
+strw_prod_price <- strawberry_survey_split |> slice(spr)
+
+strw_chem <- strawberry_survey_split |> slice(-1*spr) 
+
+  
+```
+
+## now examine the rest of the columns
+
+Which ones need to be split?
+
+## split sales and chemicals into two dataframes
+
+(do this last after separating rows into separate data frames) (THEN rename the columns to correspond the analysis being done with the data frames)
+
+```{r}
+#|label: split srawberry into census and survey pieces
+
+strw_b_sales <- strawberry |> filter(Program == "CENSUS")
+
+strw_b_chem <- strawberry |> filter(Program == "SURVEY")
+
+nrow(strawberry) == (nrow(strw_b_chem) + nrow(strw_b_sales))
+
+## Move marketing-related rows in strw_b_chem 
+## to strw_b_sales
+
+
+```
+
+## plots
+
+```{r}
+#|label: plot 1
+
+plot1_data <- strawberry |> 
+  select(c(Year, State, Category, Value)) |> 
+  filter((Year == 2021) & (Category == "ORGANIC - OPERATIONS WITH SALES"))
+
+plot1_data$Value <- as.numeric(plot1_data$Value)
+
+plot1_data <- plot1_data |> arrange(desc(Value))
+
+ggplot(plot1_data, aes(x=reorder(State, -Value), y=Value)) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x=element_text(angle=45,hjust=1)) +
+  labs(x = "States", y = "Count",
+title ="Number of Organic Strawberry operations with Sales in 2021")
+
+
+```
+
+```{r}
+## plot 2
+
+plot2_data <- strawberry |> 
+  select(c(Year, State, Category, Item, Value)) |> 
+  filter((Year == 2021) & 
+           (Category == "ORGANIC - SALES") & 
+           (Item == "MEASURED IN $") & 
+           (Value != "(D)"))
+
+
+plot2_data$Value <- as.numeric(gsub(",", "", plot2_data$Value))
+
+plot2_data <- plot1_data |> arrange(desc(Value))
+
+ggplot(plot2_data, aes(x=reorder(State, -Value), y=Value)) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x=element_text(angle=45,hjust=1)) +
+  labs(x = "States", y = "Sales",
+title ="Organic Strawberry Sales ($) in 2021")
+
+
+```
+
+
+#chem, fertilizer, production for survey
+#for census: organic, nonorganic
