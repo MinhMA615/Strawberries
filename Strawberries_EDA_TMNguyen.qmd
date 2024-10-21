@@ -8,6 +8,8 @@ format:
 editor: visual
 ---
 
+#Please note: I don't know why I can't get this to render to pdf, so I submitted it as a qmd. Sorry! I'll to to figure it out for next time!
+
 # Strawberries: Data
 
 This is a project about acquiring strawberry data from the USDA-NASS system and then cleaning, organizing, and exploring the data in preparation for data analysis. To get started, I acquired the data from the USDA NASS system and downloaded them in a csv.
