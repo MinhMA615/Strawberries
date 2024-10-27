@@ -1,0 +1,1146 @@
+---
+title: "Stawberries "
+author: "Truc Minh Nguyen"
+date: 2024 Oct 28
+format:
+  html:
+    embed-resources: true
+editor: visual
+---
+
+# Strawberries: Data
+
+This is a project about acquiring strawberry data from the USDA-NASS system and then cleaning, organizing, and exploring the data in preparation for data analysis. To get started, I acquired the data from the USDA NASS system and downloaded them in a csv.
+
+![Fruit Growers News (1)](C:/Users/minh8/Documents/R%20mssp/MA615/Strawberries/California-strawberries.png){fig-align="center" width="50%"}
+
+## Questions about Strawberries
+
+-   Where they are grown? By whom?
+
+-   Are they really loaded with carcinogenic poisons?
+
+-   Are they really good for your health? Bad for your health?
+
+-   Are organic strawberries carriers of deadly diseases?
+
+-   When I go to the market should I buy conventional or organic strawberries?
+
+-   Do Strawberry farmers make money?
+
+-   How do the strawberries I buy get to my market?
+
+## Strawberry data source and parameters
+
+The data set for this assignment has been selected from:
+
+\[[USDA_NASS_strawb_2024SEP25](https://quickstats.nass.usda.gov).
+
+The data have been stored on NASS here: [USDA_NASS_strawb_2024SEP25](https://quickstats.nass.usda.gov/results/28141CE5-7429-36C3-A385-33ACC8030763) .
+
+For the assignment, I stored the csv I downloaded on the MA615 Blackboard as strawberries25_v3.csv.
+
+```{r}
+#| label: load libraries and set options
+#| warning: false
+#| message: false
+#| echo: false
+
+library(knitr)  
+library(kableExtra)
+library(tidyverse)
+library(magrittr)
+library(PubChemR)
+
+
+```
+
+```{r}
+#| label: read data - glimpse 
+#| echo: false
+
+strawberry <- read_csv("strawberries25_v3.csv", col_names = TRUE, show_col_types = FALSE )
+
+## glimpse(strawberry)
+```
+
+The data was originally collected at the county, state, and national levels, but the degree of missingness at the state level was too high, so I dropped the county-level data.
+
+```{r}
+#| label: ditch the counties
+#| echo: false
+
+# unique(strawberry$`Geo Level`)
+
+strawberry <- strawberry |> 
+  filter(`Geo Level`== "NATIONAL" | `Geo Level`== "STATE")
+  
+
+```
+
+There are 5,359 rows and 21 column in the initial data set. The only complete year is 2022, although there is data for years 2018 through 2024.
+
+To work with the data, define a function to remove columns with only single value in all its rows.
+
+```{r}
+#| label: function def - drop 1-item columns
+#| echo: false
+
+drop_one_value_col <- function(df, prt_val = FALSE){ 
+ # browser()
+  df_id <- ensym(df)
+  if(prt_val){
+  msg = paste("Looking for single value columns in data frame: ",as.character(df_id) )
+  print(msg)}
+  ## takes whole dataframe
+dropc <- NULL
+val <- NULL
+## test each column for a single value
+for(i in 1:dim(df)[2]){   
+  if(dim(distinct(df[,i]))[1] == 1){
+    dropc <- c(dropc, i)
+    val <- c(val, df[1,i])
+  }
+} 
+
+if(prt_val){
+if(is.null(dropc)){
+  print("No columns dropped")
+  return(df)}else{
+   print("Columns dropped:")
+   # print(colnames(df)[drop])
+   print(unlist(val))
+   df <- df[, -1*dropc]
+   return(df)
+  }
+}
+ df <- df[, -1*dropc]
+   return(df)
+}
+
+
+## use the function
+
+strawberry <- strawberry |> drop_one_value_col(prt_val = FALSE)
+
+
+```
+
+To work with this data, split the Census data from the Survey data.
+
+## Census data cleaning and organizing
+
+we're examining census data because it's different from survey data
+
+![A Path to Health (2)](C:/Users/minh8/Documents/R%20mssp/MA615/Strawberries/non-organic_vs_organic.png){fig-align="center" width="50%"}
+
+```{r}
+#| label: srawberries split census, survey
+#| echo: false
+
+
+straw_cen <- strawberry |> filter(Program=="CENSUS")
+
+straw_sur <- strawberry |> filter(Program=="SURVEY")
+
+straw_cen <- straw_cen |> drop_one_value_col()
+
+straw_sur <- straw_sur |> drop_one_value_col()
+
+rm(strawberry)
+
+```
+
+```{r}
+#| label: straw_cen split cols
+#| echo: false
+
+straw_cen <- straw_cen |>
+  separate_wider_delim(  cols = `Data Item`,
+                         delim = " - ",
+                         names = c("strawberries",
+                                 "Category"),
+                         too_many = "error",
+                         too_few = "align_start"
+                       )
+
+```
+
+## Survey data cleaning and organizing
+
+```{r}
+#| label: Survey data starts here
+#| echo: false
+
+## Data Item
+
+## unique(straw_sur$`Data Item`)
+
+straw_sur1 <- straw_sur |>  separate_wider_delim(cols = `Data Item`,
+                                                delim = ", ",
+                                                names = c("straw",
+                                                         "mkt",
+                                                         "measure",
+                                                         "other"
+                                                         ),
+                                                too_many = "merge",
+                                                too_few = "align_start")
+                                                
+                                                  
+straw_sur2 <- straw_sur1 |> separate_wider_delim(cols = "straw", 
+                                                 delim = " - ",
+                                                 names = c("straw",
+                                                           "more"),
+                                                 too_many = "merge",
+                                                 too_few = "align_start"
+                                                 )
+  
+
+rm(straw_sur, straw_sur1)
+
+```
+
+Shift data into alignment function
+
+```{r}
+#| label: function shift_loc() Shift data on a row
+#| echo: false
+
+## function shift_loc
+## Moves adjacent data cells in a data.frame on a single row
+## Use this function to fix alignment problems after separating 
+## columns containing multiple columns of data. 
+
+## Of course the working assumption is that there is room in the 
+## data frame for the data you're shifting.
+##
+## The data cells that are empty after the data shift are NA.
+## 
+## Input paramaters
+## 
+## df -- data frame
+## col_name -- name of colume where the left-most data item is located
+## dat_name -- name of data item in the column
+## num_col -- the number of columns is the same as the number of
+##            adjacent data to be moved.
+## num_shift -- the number of rows to move the data 
+##
+
+
+shift_loc <- function(df, col_name, dat_name, num_col, num_shift){
+ # browser()
+  col_num = which(colnames(df) == col_name)
+  row_num = which(df[,col_num] == dat_name)  ## calcs a vector of rows
+  
+  for(k in 1:length(row_num)){
+  d = rep(0,num_col) ## storage for items to be moved
+  for(i in 1:num_col){
+    d[i] = df[row_num[k], col_num + i - 1]
+  }
+  for(i in 1:num_col){
+    ra = row_num[k]
+    cb = col_num + i - 1
+    df[ra, cb] <-  NA
+  }
+  for(j in 1:num_col){
+    rc = row_num[k]
+    cd = col_num + j - 1 + num_shift
+    df[rc, cd] = d[j]
+  }
+  }
+ # sprintf("Rows adjusted:")
+  # print("%d",row_num)
+  return(df)
+}
+
+```
+
+```{r}
+#| label: use shift_loc() to align columns
+#| echo: false
+
+
+straw_sur2 %<>% shift_loc("more", "PRICE RECEIVED", 2, 1 )
+
+straw_sur2 %<>% shift_loc("more", "ACRES HARVESTED", 1, 1 )
+
+straw_sur2 %<>% shift_loc("more", "ACRES PLANTED", 1, 1 )
+
+straw_sur2 %<>% shift_loc("more", "PRODUCTION", 2, 1 )
+
+straw_sur2 %<>% shift_loc("more", "YIELD", 2, 1 )
+
+straw_sur2 %<>% shift_loc("more", "APPLICATIONS", 3, 1 )
+
+straw_sur2 %<>% shift_loc("more", "TREATED", 3, 1 )
+
+straw_sur2 %<>% drop_one_value_col()
+
+
+```
+
+Examine Domain
+
+```{r}
+#| label: split domain column into chem, fert, total data frames
+#| echo: false
+
+# unique(straw_sur2$Domain)
+#    The Domain column (2965 rows) contains data about
+#    Chemicals (3359 rows)
+#    Fertilizers (115 rows)
+#    Production and Yield data ("TOTAL") (491 rows)
+#
+
+#    The Chemical data is in categories for 
+#         Insecticides
+#         Fungicides
+#         Herbicdes, and
+#         Other
+#
+
+#    The Domain is split into three dataframes for
+#     "Total", "Chemical", and "Fertilizer"
+
+
+straw_sur2 <- straw_sur2 |>  
+  separate_wider_delim(cols = Domain,
+                      delim = ", ",
+                      names = c("col1",
+                                "col2"),
+                                                
+                      too_many = "merge",
+                      too_few = "align_start")
+
+
+# unique(straw_sur2$col1)
+
+survey_d_total <- straw_sur2 |>  filter(col1 == "TOTAL")
+
+survey_d_chem <- straw_sur2 |>  filter(col1 == "CHEMICAL")
+
+survey_d_fert <- straw_sur2 |>  filter(col1 == "FERTILIZER")
+
+
+```
+
+now look at totals
+
+```{r}
+#| label: align columns
+#| echo: false
+
+survey_d_total %<>% drop_one_value_col()
+
+### align terms
+
+survey_d_total %<>% shift_loc("measure", "MEASURED IN $ / CWT", 1, 1 )
+
+
+survey_d_total %<>% shift_loc("measure", "MEASURED IN $", 1, 1 )
+
+
+survey_d_total %<>% shift_loc("measure", "MEASURED IN CWT", 1, 1 )
+
+survey_d_total %<>% shift_loc("measure", "MEASURED IN TONS", 1, 1 )
+
+
+survey_d_total %<>% shift_loc("measure", "MEASURED IN CWT / ACRE", 1, 1 )
+
+survey_d_total %<>% shift_loc("measure", "MEASURED IN TONS / ACRE", 1, 1 )
+
+
+#### split the mkt column
+
+
+survey_d_total <- survey_d_total |>  
+  separate_wider_delim(cols = mkt,
+                      delim = " - ",
+                      names = c("col3",
+                                "col4"),
+                   too_many = "merge",
+                    too_few = "align_start")
+
+```
+
+there are two markets for Strawberries -- Fresh Marketing and Processing
+
+make a table for each
+
+from the Survey Totals
+
+we have reports for
+
+Markets: Fresh and Processing Operations: Growing and Production
+
+```{r}
+#| label: markets
+#| echo: false
+
+survey_d_total %<>%
+  select(-`State ANSI`)
+
+survey_d_total <- survey_d_total |> 
+  group_by(Year) |> 
+  group_by(State) |>
+  group_by(Period) |>
+  group_by(col3)
+
+
+
+# unique(survey_d_total$col3)
+# unique(survey_d_total$col4)
+
+# mv <- survey_d_total |> filter(col3=="PRODUCTION") |> count()
+# mv1 <- which(survey_d_total$col3 == "PRODUCTION") 
+# mv2 <- is.na(survey_d_total$col4[mv1])
+# sum(mv2) == length(mv1)
+
+survey_d_total <-  survey_d_total |>
+  shift_loc(col_name = "col3", dat_name = "PRODUCTION", 2, 1)
+
+# mv1 <- which(survey_d_total$col3 == "PRICE RECEIVED") 
+# mv2 <- is.na(survey_d_total$col4[mv1])
+# sum(mv2) == length(mv1)
+
+
+survey_d_total <-  survey_d_total |>
+  shift_loc(col_name = "col3", 
+            dat_name = "PRICE RECEIVED", 2, 1)
+
+survey_d_total <-  survey_d_total |>
+  rename(market = col3, product_price = col4, summ = measure, measure = other)
+
+
+## fix ACRES HARVESTED 
+## the category "HARVESTED" and its measure "acRES" are in reverse
+## order
+
+h_index <- which(str_detect(survey_d_total$market, "ACRES HARVESTED") == TRUE)
+survey_d_total$product_price[h_index] <- "HARVESTED"
+survey_d_total$measure[h_index] <- "acres"
+survey_d_total$market[h_index] <- NA
+
+## fix ACRES PLANTED
+p_index <- which(str_detect(survey_d_total$market, "ACRES PLANTED") == TRUE)
+survey_d_total$product_price[p_index] <- "PLANTED"
+survey_d_total$measure[p_index] <- "Acres"
+survey_d_total$market[p_index] <- NA
+
+## fixed up measure column
+survey_d_total$measure <- str_replace(survey_d_total$measure, "MEASURED IN ", "")
+
+## Other table fix-ups
+## move Yield
+
+y_index <- which(str_detect(survey_d_total$market, "YIELD") == TRUE)
+survey_d_total$product_price[y_index] <- "YIELD"
+survey_d_total$market[y_index] <- NA
+
+ns_index <- which(str_detect(survey_d_total$market, "NOT SOLD") == TRUE)
+survey_d_total$product_price[ns_index] <- "NOT SOLD"
+survey_d_total$market[ns_index] <- NA
+
+u_index <- which(str_detect(survey_d_total$market, "UTILIZED") == TRUE)
+survey_d_total$product_price[u_index] <- "UTILIZED"
+survey_d_total$market[u_index] <- NA
+
+rm(ns_index, p_index, u_index, y_index, h_index, straw_sur2)
+
+```
+
+```{r}
+#| label: make state-wise DFs
+#| echo: false
+
+
+# unique(survey_d_total$State)
+# [1] "US TOTAL"       "CALIFORNIA"    
+# [3] "FLORIDA"        "OTHER STATES"  
+# [5] "NEW YORK"       "NORTH CAROLINA"
+# [7] "OREGON"         "WASHINGTON"  
+
+
+sur_tot_ca <- survey_d_total |> 
+  filter(State == "CALIFORNIA")
+
+sur_tot_fl <- survey_d_total |> 
+  filter(State == "FLORIDA")
+
+sur_tot_other <- survey_d_total |> 
+  filter(State == "OTHER STATES")
+
+sur_tot_US <- survey_d_total |> 
+  filter(State == "US TOTAL")
+
+```
+
+### California and Florida chemicals
+
+```{r}
+#| label: chem clean, organize, split ca and fl
+#| echo: false
+
+## begin by cleaning up the chemical df for both ca and fl
+
+survey_d_chem <- survey_d_chem |> drop_one_value_col()
+
+survey_d_chem <- survey_d_chem |> select(-`State ANSI`)
+
+## Now investigate the chemicals df
+
+su <- survey_d_chem |> group_by(mkt) |> count() 
+
+## It looks like chemicals applied to bear acres is what matters
+## but what is "treated"
+
+# For each type of chemical used, the acres treated were reported only once even if the acres were treated more than once. .
+
+## see https://www.growingproduce.com/crop-protection/usda-to-dig-into-chemical-use-on-washington-and-oregon-fruit-crops/
+
+## so look at APPLICATIONS, BEARING - TREATED, and TREATED
+
+apps <- survey_d_chem |> filter(mkt == "APPLICATIONS")
+
+treat <- survey_d_chem |> filter(mkt == "TREATED")
+
+bear_tr <- survey_d_chem |> filter(mkt == "BEARING - TREATED")
+
+### apps and treat show avg values but don't report numerical results
+
+### bear_tr is the average percentage of bearing acres getting a 
+### particular treatment
+### for the moment I'll keep the summaries I just made to check
+### that the chemicals they report were reported in
+### for applications to bearing acres
+
+### so focus on mkt == BEARING - APPLICATONS
+
+sur_chem <- survey_d_chem |> filter(mkt == "BEARING - APPLICATIONS")
+
+sur_chem <- sur_chem |> drop_one_value_col()
+
+sur_chem$measure <- str_replace(sur_chem$measure, "MEASURED IN ", "")
+
+## rename for convenience and then split -- so lazy
+sur_chem <- sur_chem |> rename(chem = `Domain Category`)
+
+sur_chem <- sur_chem |>
+          separate_wider_delim(cols = chem,
+                              delim = ", ",
+                              names = c("col3",
+                                "col4"),
+                           too_many = "merge",
+                            too_few = "align_start")
+
+sur_chem <- sur_chem |> drop_one_value_col(prt_val = FALSE)
+
+sur_chem <- sur_chem |>
+          separate_wider_delim(cols = col4,
+                              delim = ": ",
+                              names = c("type",
+                                "col5"),
+                           too_many = "error",
+                            too_few = "align_start")
+
+## remove redundent column
+
+    if(sum(sur_chem$col2 == sur_chem$type) == dim(sur_chem)[1])
+      {sur_chem <- sur_chem |> select(-col2)}
+
+## remove parens around chem name and chem index number
+
+    sur_chem$col5 <- str_replace(sur_chem$col5, "^\\(", "")
+  
+    sur_chem$col5 <- str_replace(sur_chem$col5, "\\)$", "")
+
+## split chem name and chem index into two cols
+    
+    sur_chem <- sur_chem |>  
+      separate_wider_delim(cols = col5,
+                      delim = " = ",
+                      names = c("chem_name",
+                                "chem_index"),
+                   too_many = "error",
+                    too_few = "align_start")
+  
+## separate ca and fl
+
+chem_ca <- sur_chem |> 
+  filter(State == "CALIFORNIA") |>
+  select(-State)
+
+
+
+chem_fl <- sur_chem |> 
+  filter(State == "FLORIDA") |>
+  select(-State)
+
+```
+
+```{r}
+#| label: make lists for chem types - check if complete
+#| echo: false
+
+## ca fungicide list
+ca_chem_fung <- chem_ca |>   
+  filter(type == "FUNGICIDE") |> 
+  select(chem_name, chem_index) |>
+  distinct()
+  
+
+ca_chem_herb <- chem_ca |>   
+  filter(type == "HERBICIDE") |>
+   select(chem_name, chem_index) |>
+  distinct()
+
+
+ca_chem_insect <- chem_ca |>   
+  filter(type == "INSECTICIDE") |>
+   select(chem_name, chem_index) |>
+  distinct()
+
+ca_chem_other <- chem_ca |>   
+  filter(type == "OTHER") |>
+   select(chem_name, chem_index) |>
+  distinct()
+
+#####  fl fungicide list
+fl_chem_fung <- chem_fl |>   
+  filter(type == "FUNGICIDE") |> 
+   select(chem_name, chem_index) |>
+  distinct()
+  
+
+fl_chem_herb <- chem_fl |>   
+  filter(type == "HERBICIDE") |>
+   select(chem_name, chem_index) |>
+  distinct()
+
+
+fl_chem_insect <- chem_fl |>   
+  filter(type == "INSECTICIDE") |>
+   select(chem_name, chem_index) |>
+  distinct()
+
+fl_chem_other <- chem_fl |>   
+  filter(type == "OTHER") |>
+  select(chem_name, chem_index) |>
+  distinct()
+
+
+fung <- sur_chem |> 
+  filter(type == "FUNGICIDE") |>
+  select(chem_name, chem_index) |>
+  distinct()
+fung_ca_only <- setdiff(ca_chem_fung, fl_chem_fung)
+fung_fl_only <- setdiff(fl_chem_fung, ca_chem_fung)
+fung_flca <- intersect(fl_chem_fung, ca_chem_fung)
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+library(webchem)
+etox_basic(7242)
+
+```
+
+### California and Florida fertilizers
+
+```{r}
+#| label: fertilizer
+#| echo: false
+
+survey_d_fert <- survey_d_fert |> drop_one_value_col()
+
+survey_d_fert <- survey_d_fert |> select(-`State ANSI`)
+
+survey_d_fert <- survey_d_fert |>  
+  separate_wider_delim(cols = mkt,
+                      delim = " - ",
+                      names = c("mk1",
+                                "mk2"),
+                   too_many = "merge",
+                    too_few = "align_start")
+                
+survey_d_fert$measure <- str_replace(survey_d_fert$measure, "MEASURED IN ", "")
+
+# unique(survey_d_chem$`Domain Category`)
+
+survey_d_fert$`Domain Category` <- str_replace(survey_d_fert$`Domain Category`, "CHEMICAL, ", "")
+
+survey_d_fert <- survey_d_fert |> rename(chem = `Domain Category`)
+
+survey_d_fert <- survey_d_fert |>
+          separate_wider_delim(cols = chem,
+                              delim = ": ",
+                              names = c("type",
+                                "chem_type"),
+                           too_many = "merge",
+                            too_few = "align_start")
+
+  survey_d_fert <- survey_d_fert |> 
+    rename(chem_name = chem_type)
+  
+  survey_d_fert$chem_name <- str_replace(survey_d_fert$chem_name, "^\\(", "")
+  
+   survey_d_fert$chem_name <- str_replace(survey_d_fert$chem_name, "\\)$", "")
+   
+   survey_d_fert <- survey_d_fert |> drop_one_value_col()
+  
+
+```
+
+```{r}
+#| label: final filters 1
+#| echo: false
+
+survey_d_total_ca <- survey_d_total |> 
+  filter(State == "CALIFORNIA")
+
+ca_tab <- survey_d_total_ca |> group_by(Year, Period
+                                        )
+ca_tab_22 <- survey_d_total_ca |> filter(Year == 2022)
+
+ca_tab_22 <- ca_tab_22 |> drop_one_value_col()
+
+ca_tab_22 <- ca_tab_22 |> 
+  filter(Period == "YEAR")
+
+ca_tab_22 <- ca_tab_22 |> 
+  filter(Value != "(D)")
+
+ca_tab_22 <- ca_tab_22 |> drop_one_value_col()
+
+```
+
+## Chemicals usd in strawberry cultivaion
+
+### Six deadly carcinogens from WHO list
+
+[captafol](https://en.wikipedia.org/wiki/Captafol)
+
+[ethylene dibromide](https://en.wikipedia.org/wiki/1,2-Dibromoethane) [also](https://www.epa.gov/sites/default/files/2016-09/documents/ethylene-dibromide.pdf)
+
+[glyphosate](https://en.wikipedia.org/wiki/Glyphosate) See also [1](https://www.ewg.org/areas-focus/toxic-chemicals/glyphosate)\
+[2](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9101768/)\
+[3](http://npic.orst.edu/factsheets/glyphogen.html)\
+[4](https://www.epa.gov/ingredients-used-pesticide-products/glyphosate)
+
+[malathion](https://en.wikipedia.org/wiki/Malathion) [1](https://www.epa.gov/mosquitocontrol/malathion) [2](http://npic.orst.edu/factsheets/malagen.html)
+
+[diazinon](https://en.wikipedia.org/wiki/Diazinon) [1](https://wwwn.cdc.gov/TSP/PHS/PHS.aspx?phsid=511&toxid=90#:~:text=Diazinon%20is%20the%20common%20name,Dazzel%2C%20Gardentox%2C%20and%20Knoxout.) [2](http://npic.orst.edu/factsheets/Diazgen.html) [3](https://earthjustice.org/feature/organophosphate-pesticides-united-states/diazinon)
+
+[dichlorophenyltrichloroethane (DDT)](https://en.wikipedia.org/wiki/DDT) [1](https://www.acs.org/molecule-of-the-week/archive/d/dichlorodiphenyltrichloroethane.html) [2](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1240724/) \[3\](https://www.epa.gov/ingredients-used-pesticide-products/ddt-brief-history-and-status#:\~:text=DDT%20(dichloro%2Ddiphenyl%2Dtrichloroethane,both%20military%20and%20civilian%20populations.)
+
+### For contrast
+
+[Azadirachtin](https://en.wikipedia.org/wiki/Azadirachtin) [1](https://pubchem.ncbi.nlm.nih.gov/compound/Azadirachtin#section=2D-Structure) [2](https://www.acs.org/molecule-of-the-week/archive/a/azadirachtin.html#:~:text=Azadirachtin%20is%20an%20impressive%20molecule,and%20four%20carboxylic%20acid%20esters.) [3](http://npic.orst.edu/factsheets/neemgen.html)
+
+### Sources of agricultural chemical information
+
+[pubChem](https://pubchem.ncbi.nlm.nih.gov/)
+
+[EPA search](https://ordspub.epa.gov/ords/pesticides/f?p=chemicalsearch:1)
+
+\[ETOX\]\](https://webetox.uba.de/webETOX/index.do) [webchem R pkg](https://cran.r-project.org/web/packages/webchem/index.html)
+
+[Safety Data Sheets](https://chemicalsafety.com/sds-search/)
+
+for EPA number lookup [epa numbers](https://archive.epa.gov/pesticides/chemicalsearch/chemical/foia/web/html/128810.html)
+
+[Active Pesticide Product Registration Informational Listing](https://ordspub.epa.gov/ords/pesticides/f?p=APPRIL_PUBLIC:2::::::)
+
+[CAS for Methyl Bromide](https://ordspub.epa.gov/ords/pesticides/f?p=113:17::::::)
+
+[pesticide chemical search](https://ordspub.epa.gov/ords/pesticides/f?p=chemicalsearch:1)
+
+[toxic chemical dashboard](https://comptox.epa.gov/dashboard/)
+
+[pubChem](https://pubchem.ncbi.nlm.nih.gov/)
+
+The EPA PC (Pesticide Chemical) Code is a unique chemical code number assigned by the EPA to a particular pesticide active ingredient, inert ingredient or mixture of active ingredients.
+
+Investigating toxic pesticides
+
+[start here with chem PC code](https://ordspub.epa.gov/ords/pesticides/f?p=chemicalsearch:1)
+
+[Pesticide Product and Label System](https://ordspub.epa.gov/ords/pesticides/f?p=113:1::::RP,17,1::)
+
+[Search by Chemical](https://ordspub.epa.gov/ords/pesticides/f?p=113:17::::::)
+
+[CompTox Chemicals Dashboard](https://comptox.epa.gov/dashboard/)
+
+[Active Pesticide Product Registration Informational Listing](https://ordspub.epa.gov/ords/pesticides/f?p=APPRIL_PUBLIC:2::::::)
+
+[OSHA chemical database](https://www.osha.gov/chemicaldata)
+
+[Pesticide Ingredients](http://npic.orst.edu/ingred/)
+
+[NPIC Product Research Online (NPRO)](http://npic.orst.edu/NPRO/)
+
+[Databases for Chemical Information](http://npic.orst.edu/ingred/cheminfo.html)
+
+[Pesticide Active Ingredients](http://npic.orst.edu/ingred/active.html)
+
+[TSCA Chemical Substance Inventory](https://www.epa.gov/tsca-inventory)
+
+I want to explore the top 5 chemicals used by lbs in California for the past few years.
+
+```{r}
+# Make the value col in chem_ca numeric 
+chem_ca$Value <- str_replace(chem_ca$Value, ",", "")
+chem_ca$Value <- as.numeric(chem_ca$Value)
+
+# Filter by measure unit of LB
+chem_ca_lb <- chem_ca |> filter(measure == "LB") |> filter(!is.na(Value), chem_name != "TOTAL") |> arrange(Year, desc(Value))
+
+
+# Get the top 5 highest values per year
+top5_CA <- chem_ca_lb |>
+  group_by(Year) |>
+  top_n(5, Value)
+
+# Plotting
+# Define set chemical colors: 
+chemical_colors <- c(
+  "BIFENAZATE" = "#F8766D",
+  "CAPTAN" = "#A3A500",
+  "CYPRODINIL" = "#00BF7D",
+  "DICHLOROPROPENE" = "#00B0F6",
+  "MALATHION" = "#E76BF3",
+  "METAM-POTASSIUM" = "#FF61C3",
+  "METAM-SODIUM" = "#C70039",
+  "NEEM OIL, CLAR. HYD." = "#FF9DA7",
+  "PENDIMETHALIN" = "#6A3D9A",
+  "SULFUR" = "#FFC107",
+  "THIRAM" = "#1F618D"
+)
+
+top5_CA_no_imp <- ggplot(top5_CA, aes(x = as.factor(Year), y = Value, fill = chem_name)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = chemical_colors)+
+  labs(title = "Top 5 Chemicals by Pounds(LBS) per Year in CA",
+       x = "Year",
+       y = "LBS", 
+       fill = "Chemical Name") +
+  theme_minimal()
+
+top5_CA_no_imp
+
+# Based on the results, I want to start my investigation with the chemical, sulfur.
+
+```
+
+Let's get a dataframe containing all rows with chem_name == "SULFUR".
+
+```{r}
+chem_ca_sulfur <- chem_ca |> filter(chem_ca$chem_name == "SULFUR")
+
+```
+
+Looking at the graph, above, I noticed sulfur was missing in 2023. Looking at the dataframe chem_ca_sulfur, I see that in 2023, sulfur contained values for other units such as lb/acre/year and lb/acre/application. It is missing for unit of lb because I took out the NA values. Therefore, I have to impute the lb value for sulfur usage in 2023.
+
+```{r}
+
+#Create proportion df of lb/(lb/acre/app + lb/acre/yr) for sulfur for 2021, 2019 2018
+proportion_ca_sulfur <- chem_ca_sulfur |>
+  filter(Year %in% c(2021, 2019, 2018)) |>
+  group_by(Year) %>%
+  summarize(
+    LB = sum(Value[measure == "LB"]),
+    LB_Acre_Application = sum(Value[measure == "LB / ACRE / APPLICATION"]),
+    LB_Acre_Year = sum(Value[measure == "LB / ACRE / YEAR"]),
+    Proportion = LB / (LB_Acre_Application + LB_Acre_Year)
+  )
+
+#calculate average proportion 
+average_proportion_factor <- mean(proportion_ca_sulfur$Proportion, na.rm = TRUE)
+
+sum_application_year_2023 <- sum(chem_ca_sulfur$Value[chem_ca_sulfur$Year == 2023 & chem_ca_sulfur$measure %in% c("LB / ACRE / APPLICATION", "LB / ACRE / YEAR")], na.rm = TRUE)
+
+#impute value for 2023
+chem_ca_sulfur <- chem_ca_sulfur |>
+  mutate(Value = ifelse(Year == 2023 & measure == "LB" & is.na(Value), 
+                        round(sum_application_year_2023 * average_proportion_factor), Value))
+
+#regraph with just sulfur
+#scale lb by dividing by 100,000 
+chem_ca_sulfur <- chem_ca_sulfur |>
+  mutate(Value = ifelse(measure == "LB" & !is.na(Value), Value / 100000, Value))
+
+chem_ca_sulfur <- chem_ca_sulfur |>
+  mutate(measure = ifelse(measure == "LB", "LB in 100,000", measure))
+
+chem_ca_sulfur <- chem_ca_sulfur |> filter(measure != "NUMBER")
+
+ggplot(chem_ca_sulfur, aes(x = as.factor(Year), y = Value, fill = measure)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Sulfur Usage in California",
+       x = "Year",
+       y = "Measure", 
+       fill = "Measure") +
+  theme_minimal()
+ 
+```
+
+EDA of Sulfur Usage in California: The relationship between LB and LB/ACRE/YEAR seems consistent for 2018, 2019, and 2021. In 2021, even though LB was about 100,000 less than 2019, the farms that used sulfur that year the ratio of lb/acre to lb is greater than the same ratio for 2019. It makes me wonder if the concentration might have been increased during the usage.
+
+Conclusion of Sulfur: based on what I have seen with sulfur, I am incline to believe that other chemicals that didn't show up in the top 5 for all the years but showed up in some of the years might be missing and needs imputation. Let's continue with Dichloropropene.
+
+```{r}
+chem_ca_dichlo <- chem_ca |> filter(chem_ca$chem_name == "DICHLOROPROPENE")
+
+```
+
+```{r}
+
+#impute the missing value for LB in 2023 and 2019 for dichloropropene using the same method we used
+#for sulfur. 
+
+#create proportion df of lb/(lb/acre/app + lb/acre/yr) for dichloropropene for 2021, 2018
+proportion_ca_dichlo <- chem_ca_dichlo |>
+  filter(Year %in% c(2021, 2018)) |>
+  group_by(Year) %>%
+  summarize(
+    LB = sum(Value[measure == "LB"]),
+    LB_Acre_Application = sum(Value[measure == "LB / ACRE / APPLICATION"]),
+    LB_Acre_Year = sum(Value[measure == "LB / ACRE / YEAR"]),
+    Proportion = LB / (LB_Acre_Application + LB_Acre_Year)
+  )
+
+#calculate average proportion 
+average_proportion_factor <- mean(proportion_ca_dichlo$Proportion, na.rm = TRUE)
+
+sum_application_year_2023 <- sum(chem_ca_dichlo$Value[chem_ca_dichlo$Year == 2023 & chem_ca_dichlo$measure %in% c("LB / ACRE / APPLICATION", "LB / ACRE / YEAR")], na.rm = TRUE)
+sum_application_year_2019 <- sum(chem_ca_dichlo$Value[chem_ca_dichlo$Year == 2019 & chem_ca_dichlo$measure %in% c("LB / ACRE / APPLICATION", "LB / ACRE / YEAR")], na.rm = TRUE)
+
+
+#impute value for 2023 & 2019
+chem_ca_dichlo <- chem_ca_dichlo |>
+  mutate(Value = ifelse(Year == 2023 & measure == "LB" & is.na(Value), 
+                        round(sum_application_year_2023 * average_proportion_factor), Value))
+chem_ca_dichlo <- chem_ca_dichlo |>
+  mutate(Value = ifelse(Year == 2019 & measure == "LB" & is.na(Value), 
+                        round(sum_application_year_2019 * average_proportion_factor), Value))
+
+
+#regraph with just dichlo
+#scale lb by dividing by 100,000 
+chem_ca_dichlo <- chem_ca_dichlo |>
+  mutate(Value = ifelse(measure == "LB" & !is.na(Value), Value / 100000, Value))
+
+chem_ca_dichlo <- chem_ca_dichlo |>
+  mutate(measure = ifelse(measure == "LB", "LB in 100,000", measure))
+
+chem_ca_dichlo <- chem_ca_dichlo |> filter(measure != "NUMBER")
+
+ggplot(chem_ca_dichlo, aes(x = as.factor(Year), y = Value, fill = measure)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Dichloropropene Usage in California",
+       x = "Year",
+       y = "Measure", 
+       fill = "Measure") +
+  theme_minimal()
+ 
+```
+
+Conclusion: I'm not sure why the lb/acre/year increased so much between 2018 and 2019 while the lb/acre/application remained fairly the same...It is important to note that the imputation is and estimate that comes with a standard error. It provides a predicted value but there are uncertainty with imputing missing data. Let's take a look at how the the top 5 chemicals usage in CA appears with the imputations for missing values of sulfur and dichloropropene.
+
+```{r}
+top5_CA_imp <- top5_CA |> filter(chem_name != "SULFUR", chem_name != "DICHLOROPROPENE")
+top5_CA_imp <- rbind.data.frame(top5_CA_imp,chem_ca_sulfur,chem_ca_dichlo)
+
+# Let's mutate the units for LB back to LB instead of in 100,000 LB 
+top5_CA_imp$measure[top5_CA_imp$measure == "LB in 100,000"] <- "LB"
+top5_CA_imp$Value[top5_CA_imp$measure == "LB" & top5_CA_imp$chem_name == "SULFUR"] <- top5_CA_imp$Value[top5_CA_imp$measure == "LB" & top5_CA_imp$chem_name == "SULFUR"] * 100000
+top5_CA_imp$Value[top5_CA_imp$measure == "LB" & top5_CA_imp$chem_name == "DICHLOROPROPENE"] <- top5_CA_imp$Value[top5_CA_imp$measure == "LB" & top5_CA_imp$chem_name == "DICHLOROPROPENE"] * 100000
+
+# Let's regraph with the imputed values for sulfur and dichloropropene
+
+# Get the top 5 highest values per year (considering imputations)
+top5_CA_imp <- top5_CA_imp |>
+  group_by(Year) |>
+  top_n(5, Value)
+
+# Plotting
+chemical_colors <- c(
+  "BIFENAZATE" = "#F8766D",
+  "CAPTAN" = "#A3A500",
+  "CYPRODINIL" = "#00BF7D",
+  "DICHLOROPROPENE" = "#00B0F6",
+  "MALATHION" = "#E76BF3",
+  "METAM-POTASSIUM" = "#FF61C3",
+  "METAM-SODIUM" = "#C70039",
+  "NEEM OIL, CLAR. HYD." = "#FF9DA7",
+  "PENDIMETHALIN" = "#6A3D9A",
+  "SULFUR" = "#FFC107",
+  "THIRAM" = "#1F618D"
+)
+
+ggplot(top5_CA_imp, aes(x = as.factor(Year), y = Value, fill = chem_name)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = chemical_colors)+
+  labs(title = "Top 5 Chemicals by Pounds(LBS) per Year in CA with Imputations",
+       x = "Year",
+       y = "LBS", 
+       fill = "Chemical Name") +
+  theme_minimal()
+
+top5_CA_no_imp
+
+```
+
+Conclusion: I could go back and find other top 5 CA chemicals that might need imputations but just looking at the usage graphs, it's clear the the most used chemicals are dichloropropene and sulfur for CA, with some margin of error.
+
+Let's look at how many of the top 5 chemicals in CA contains hazards that are "fatal". I skipped Dichloropropene and Neem Oil because I couldn't readily obtain it from the GHS Search. So I will only do the other 9 chemicals that showed up in the top 5 for CA for year 2018, 2019, 2021, 2023.
+
+![Int-Enviroguard (3)](C:/Users/minh8/Documents/R%20mssp/MA615/Strawberries/fatal_hazard.png){fig-align="center" width="50%"}
+
+```{r}
+GHS_searcher<-function(result_json_object){
+  result<-result_json_object
+  for (i in 1:length(result[["result"]][["Hierarchies"]][["Hierarchy"]])){
+    if(result[["result"]][["Hierarchies"]][["Hierarchy"]][[i]][["SourceName"]]=="GHS Classification (UNECE)"){
+      return(i)
+    }
+          
+  }
+}
+```
+
+```{r}
+hazards_retriever<-function(index,result_json_object){
+  result<-result_json_object
+  hierarchy<-result[["result"]][["Hierarchies"]][["Hierarchy"]][[index]]
+  i<-1
+  output_list<-rep(NA,length(hierarchy[["Node"]]))
+  while(str_detect(hierarchy[["Node"]][[i]][["Information"]][["Name"]],"H") & i<length(hierarchy[["Node"]])){
+    output_list[i]<-hierarchy[["Node"]][[i]][["Information"]][["Name"]]
+    i<-i+1
+  }
+  return(output_list[!is.na(output_list)])
+}
+```
+
+```{r}
+
+chemical_vec<-c("SULFUR", "CAPTAN", "THIRAM", "METAM-POTASSIUM", "METAM-SODIUM", "MALATHION", "PENDIMETHALIN", "CYPRODINIL", "BIFENAZATE")
+
+hazard_func <- function(chem_name){
+  result<-get_pug_rest(identifier = chem_name, namespace = "name", domain = "compound",operation="classification", output = "JSON")
+  return(hazards_retriever(GHS_searcher(result),result))
+}
+
+chem_hazard <- sapply(chemical_vec,hazard_func)
+
+```
+
+I am going to use str_detect to search for the word "Fatal" in any of the chemicals in the chem_hazard vector. This will return a vector of true or false for each chemical in chem_hazard. I will apply a sum for each chemical to see that if it returns 1, that means there was a TRUE detection of "Fatal".
+
+```{r}
+sulfur_fatsum <- sum(str_detect(chem_hazard$SULFUR,"Fatal"))
+captan_fatsum <- sum(str_detect(chem_hazard$CAPTAN, "Fatal"))
+thiram_fatsum <- sum(str_detect(chem_hazard$THIRAM, "Fatal"))
+meta_potas_fatsum <- sum(str_detect(chem_hazard$`METAM-POTASSIUM`, "Fatal"))
+meta_sod_fatsum <- sum(str_detect(chem_hazard$`METAM-SODIUM`, "Fatal"))
+malathion_fatsum <- sum(str_detect(chem_hazard$MALATHION, "Fatal"))
+pend_fatsum <- sum(str_detect(chem_hazard$PENDIMETHALIN, "Fatal"))
+cyprodinil_fatsum <- sum(str_detect(chem_hazard$CYPRODINIL, "Fatal"))
+bifenazate_fatsum <-sum(str_detect(chem_hazard$BIFENAZATE, "Fatal"))
+
+sulfur_fatsum
+captan_fatsum
+thiram_fatsum
+meta_potas_fatsum
+meta_sod_fatsum
+malathion_fatsum
+pend_fatsum
+cyprodinil_fatsum
+bifenazate_fatsum
+
+#We see that 2 of the 9 chemicals contain fatal hazards: Captan and Thiram
+
+```
+
+### Let's take a look at Florida's top 5 chemicals by LB per year.
+
+```{r}
+#make the value col in chem_fl numeric 
+chem_fl$Value <- str_replace(chem_fl$Value, ",", "")
+chem_fl$Value <- as.numeric(chem_fl$Value)
+
+#filter by measure unit of LB
+chem_fl_lb <- chem_fl |> filter(measure == "LB") |> filter(!is.na(Value), chem_name != "TOTAL") |> arrange(Year, desc(Value))
+
+
+# Get the top 5 highest values per year
+top5_FL <- chem_fl_lb |>
+  group_by(Year) |>
+  top_n(5, Value)
+
+# Plotting
+chemical_colorsfl <- c(
+  "AZOXYSTROBIN" = "#F8766D",
+  "CAPTAN" = "#A3A500",
+  "CYPRODINIL" = "#00BF7D",
+  "FLUDIOXONIL" = "#00B0F6",
+  "NOVALURON" = "#E76BF3",
+  "THIOPHANATE-METHYL" = "#C70039",
+  "THIRAM" = "#1F618D"
+)
+ggplot(top5_FL, aes(x = as.factor(Year), y = Value, fill = chem_name)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = chemical_colorsfl)+
+  labs(title = "Top 5 Chemicals by Pounds(LBS) per Year in Florida",
+       x = "Year",
+       y = "LBS", 
+       fill = "Chemical Name") +
+  theme_minimal()
+
+
+```
+
+Conclusion: Florida seems to really only have a "top 2" instead of "top 5". And the top 2 happen to be Captan and Thiram, the chemicals that contain "fatal" hazards in the California top 5!!!! Let's plot the two chemicals values for florida and california to compare.
+
+```{r}
+top5_CA$state <- c("California")
+top5_FL$state <- c("Florida")
+fatal_chem <- rbind(top5_CA,top5_FL)
+fatal_chem <- subset(fatal_chem, chem_name %in% c("CAPTAN", "THIRAM"))
+
+chemical_colors_fatal <- c(
+  "CAPTAN" = "#A3A500",
+  "THIRAM" = "#1F618D"
+)
+ggplot(fatal_chem, aes(x = as.factor(Year), y = Value, fill = chem_name)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = chemical_colors_fatal)+
+  labs(title = "Fatal Hazard Chemical Usage Per Year",
+       x = "Year",
+       y = "LBS", 
+       fill = "Chemical Name") +
+  theme_minimal()+
+  facet_wrap(~state)
+  
+```
+
+Florida seems to use a more close proportion of Captan and Thiram whereas California appears to prefer Captan.. I wonder why that is..
+
+EDA Conclusion: Through this exercise, I've learned that the purpose of EDA is to show you what story the data can tell and what story it doesn't show clearly. However, if the variety of the data is there, you can use the info to make the best guess, but be aware that is is uncertainty. My biggest shock reveal of this project is finding out that the top chemical usage in the top states in the U.S contain fatal hazard chemicals. It makes me wonder about the regulation put in place to be able to use these chemicals and how strict is the application being monitor. I can see that the strawberry business is a big business in the U.S and perhaps that's because it's one of the favorite fruits, that creates a supply and demand situation. I wonder for the less favorable fruits if there are as many chemicals used on them....
+
+Citation for images:
+
+(1) Fruit Growers News. (2023, June 29). Survey: California strawberry acreage increases lead to optimism. Fruit Growers News. Retrieved from https://fruitgrowersnews.com/news/survey-california-strawberry-acreage-increases-lead-to-optimism/
+
+(2) A Path to Health. (2013, May 29). Strawberries: Conventional vs. organic. A Path to Health. Retrieved from https://apathtohealth.wordpress.com/2013/05/29/strawberries-conventional-vs-organic/
+
+(3) Int-Enviroguard. (n.d.). What is the GHS? Understanding the Globally Harmonized System of Classification and Labeling of Chemicals. Int-Enviroguard. Retrieved from https://int-enviroguard.com/blog/what-is-the-ghs/
