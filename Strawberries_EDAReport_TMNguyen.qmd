@@ -1137,6 +1137,7 @@ Florida seems to use a more close proportion of Captan and Thiram whereas Califo
 
 EDA Conclusion: Through this exercise, I've learned that the purpose of EDA is to show you what story the data can tell and what story it doesn't show clearly. However, if the variety of the data is there, you can use the info to make the best guess, but be aware that is is uncertainty. My biggest shock reveal of this project is finding out that the top chemical usage in the top states in the U.S contain fatal hazard chemicals. It makes me wonder about the regulation put in place to be able to use these chemicals and how strict is the application being monitor. I can see that the strawberry business is a big business in the U.S and perhaps that's because it's one of the favorite fruits, that creates a supply and demand situation. I wonder for the less favorable fruits if there are as many chemicals used on them....
 
+
 Citation for images:
 
 (1) Fruit Growers News. (2023, June 29). Survey: California strawberry acreage increases lead to optimism. Fruit Growers News. Retrieved from https://fruitgrowersnews.com/news/survey-california-strawberry-acreage-increases-lead-to-optimism/
